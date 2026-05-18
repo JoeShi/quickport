@@ -1,0 +1,323 @@
+# QuickPort Skill Scanner — Semgrep AST 规则集 v0.1.2
+# Source: @Gatekeeper (Slock msg 50b03bd7, fda3816d, f541e7ac, 7126150d)
+# Covers: R3 / R5 / R7 / R6 / R2-partial / R7-bis / R5-quick-config / R5-capability-registry (11 rules + extended patterns)
+# Status: v0.1.2 — extended quick-config patterns + capability-registry protection rule
+# Renamed: @quickwork/* → @quickport/* (OQ-6 LOCKED per @joe-shi f2986787)
+# R5 narrow waist three+one (4 critical state files now protected):
+#   1. quickwork-R5-direct-keychain-access            (credentials)
+#   2. quickwork-R5-direct-audit-log-write            (HF-4/6 audit)
+#   3. quickwork-R5-direct-quick-config-write         (Quick mcp_config.json, v0.1.2 patterns expanded)
+#   4. quickwork-R5-direct-capability-registry-write  (NEW: capability-registry.json)
+rules:
+  # ═══════════════════════════════════════════════════════
+  # R3 — process spawn diff
+  # ═══════════════════════════════════════════════════════
+  - id: quickwork-R3-js-spawn-undeclared
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: |
+      blocker P0 [critical:security] ref:skill-$SKILL_NAME#R3:
+      代码调用 child_process.$FUNC，未在 manifest.capabilities.process.spawn 声明。
+      违反 narrow waist HF-7（仅 @quickwork/orchestrator/mcp-spawner 可 spawn 子进程）。
+    pattern-either:
+      - pattern: child_process.spawn(...)
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execFile(...)
+      - pattern: child_process.fork(...)
+      - pattern: require('child_process').$FUNC(...)
+      - pattern: |
+          import { $FUNC } from 'child_process'
+          ...
+          $FUNC(...)
+    paths:
+      exclude:
+        - "**/orchestrator/mcp-spawner/**"
+        - "**/orchestrator/mcp-launcher/**"
+        # Only @quickport/orchestrator/mcp-spawner may spawn — enforced via namespace exclusion
+    metadata:
+      hf: [HF-7]
+      tier: blocker
+      severity: P0
+      dimension: ["critical:security"]
+
+  - id: quickwork-R3-py-spawn-undeclared
+    languages: [python]
+    severity: ERROR
+    message: blocker P0 [critical:security] ref:skill-$SKILL_NAME#R3
+    pattern-either:
+      - pattern: subprocess.run(...)
+      - pattern: subprocess.Popen(...)
+      - pattern: subprocess.call(...)
+      - pattern: subprocess.check_call(...)
+      - pattern: subprocess.check_output(...)
+      - pattern: os.system(...)
+      - pattern: os.exec*(...)
+      - pattern: os.popen(...)
+    metadata: {hf: [HF-7], tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  # ═══════════════════════════════════════════════════════
+  # R5 — install-orchestrator bypass detection
+  # ═══════════════════════════════════════════════════════
+  - id: quickwork-R5-js-direct-keychain-access
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: |
+      blocker P0 [critical:security] ref:skill-$SKILL_NAME#R5:
+      绕过 install-orchestrator 直接调用 OS 凭证 API。
+      所有 token/credential 操作必须通过 @quickwork/orchestrator/credentials/* API。
+    pattern-either:
+      - pattern: require('keytar').$FUNC(...)
+      - pattern: |
+          import keytar from 'keytar'
+          ...
+          keytar.$FUNC(...)
+      - pattern: |
+          import { $FUNC } from 'keytar'
+          ...
+          $FUNC(...)
+      - pattern: require('node-credential-manager').$FUNC(...)
+      - pattern: require('credential-manager').$FUNC(...)
+      - pattern: $X.exec('security ...', ...)
+      - pattern: spawn('security', ['add-generic-password', ...])
+    paths:
+      exclude:
+        - "**/orchestrator/credentials/**"
+    metadata:
+      tier: blocker
+      severity: P0
+      dimension: ["critical:security"]
+      narrow_waist: install-orchestrator
+      whitelist_namespace: "@quickport/orchestrator/credentials/*"
+
+  - id: quickwork-R5-py-direct-keychain-access
+    languages: [python]
+    severity: ERROR
+    message: blocker P0 [critical:security] ref:skill-$SKILL_NAME#R5 (Python)
+    pattern-either:
+      - pattern: keyring.set_password(...)
+      - pattern: keyring.get_password(...)
+      - pattern: keyring.delete_password(...)
+      - pattern: |
+          import keyring
+          ...
+          keyring.$FUNC(...)
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  - id: quickwork-R5-direct-audit-log-write
+    languages: [javascript, typescript, python]
+    severity: ERROR
+    message: |
+      blocker P0 [critical:security] ref:skill-$SKILL_NAME#R5:
+      直接写入 audit log，必须通过 @quickwork/orchestrator/audit/log() API。
+    pattern-either:
+      - pattern: fs.writeFileSync('~/.quickwork/.audit.json', ...)
+      - pattern: fs.writeFile('~/.quickwork/.audit.json', ...)
+      - pattern: fs.appendFileSync('~/.quickwork/.audit.json', ...)
+      - pattern: open('~/.quickwork/.audit.json', ...)
+    paths:
+      exclude:
+        - "**/orchestrator/audit/**"
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  # ═══════════════════════════════════════════════════════
+  # R7 — dangerous API
+  # ═══════════════════════════════════════════════════════
+  - id: quickwork-R7-js-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: |
+      blocker P0 [critical:security] ref:skill-$SKILL_NAME#R7:
+      eval / Function constructor / vm —— 任意代码执行风险。除非 manifest 声明 + ADR 例外条款。
+    pattern-either:
+      - pattern: eval($X)
+      - pattern: new Function($X)
+      - pattern: Function($X)
+      - pattern: vm.runInThisContext(...)
+      - pattern: vm.runInNewContext(...)
+      - pattern: require($VAR)
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  - id: quickwork-R7-py-eval
+    languages: [python]
+    severity: ERROR
+    message: blocker P0 [critical:security] ref:skill-$SKILL_NAME#R7
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: compile(..., ..., 'exec')
+      - pattern: __import__($VAR)
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  # ═══════════════════════════════════════════════════════
+  # R2 (partial) — FS write 出界检测（敏感路径硬编码部分）
+  # ═══════════════════════════════════════════════════════
+  - id: quickwork-R2-fs-write-outside-skill-dir
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: blocker P0 [critical:security] ref:skill-$SKILL_NAME#R2 — 写入 ~/.quickwork/<skill>/ 之外的敏感路径
+    pattern-either:
+      - pattern: fs.writeFile('~/.ssh/$X', ...)
+      - pattern: fs.writeFileSync('~/.ssh/$X', ...)
+      - pattern: fs.writeFile('~/.aws/$X', ...)
+      - pattern: fs.writeFileSync('~/.aws/$X', ...)
+      - pattern: fs.writeFile('/etc/$X', ...)
+      - pattern: fs.writeFileSync('/etc/$X', ...)
+      - pattern: fs.writeFile('~/.bashrc', ...)
+      - pattern: fs.writeFile('~/.zshrc', ...)
+      - pattern: fs.writeFile('~/Library/LaunchAgents/$X', ...)
+      - pattern: fs.writeFile('/etc/cron.d/$X', ...)
+    metadata:
+      tier: blocker
+      severity: P0
+      dimension: ["critical:security"]
+      sensitive_paths: [~/.ssh, ~/.aws, ~/.gnupg, /etc, ~/Library/LaunchAgents, /etc/cron.d, ~/.quickwork/mcp_config.json]
+
+  # ═══════════════════════════════════════════════════════
+  # R6 — Secrets / hardcoded credentials
+  # ═══════════════════════════════════════════════════════
+  - id: quickwork-R6-aws-key-hardcoded
+    languages: [generic]
+    severity: ERROR
+    message: blocker P0 [critical:security] ref:skill-$SKILL_NAME#R6 — 硬编码 AWS access key
+    pattern-regex: 'AKIA[0-9A-Z]{16}'
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  - id: quickwork-R6-github-token
+    languages: [generic]
+    severity: ERROR
+    message: blocker P0 [critical:security] ref:skill-$SKILL_NAME#R6 — 硬编码 GitHub token
+    pattern-regex: 'gh[pousr]_[A-Za-z0-9_]{36,}'
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  - id: quickwork-R6-private-key-block
+    languages: [generic]
+    severity: ERROR
+    message: blocker P0 [critical:security] ref:skill-$SKILL_NAME#R6 — 私钥块
+    pattern-regex: '-----BEGIN (RSA |OPENSSH |PGP |EC )?PRIVATE KEY-----'
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  # ═══════════════════════════════════════════════════════
+  # R7-bis — 命令注入 (spawn with shell metacharacter)
+  # ═══════════════════════════════════════════════════════
+  - id: quickwork-R7-bis-shell-injection
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: |
+      blocker P0 [critical:security] ref:skill-$SKILL_NAME#R7-bis:
+      spawn / exec 命令字符串包含变量拼接，命令注入风险。
+      必须用数组形式 + escape，或 spawnSync(cmd, [args], {shell: false})。
+    pattern-either:
+      - pattern: child_process.exec(`...${$X}...`, ...)
+      - pattern: child_process.exec($X + $Y, ...)
+      - pattern: |
+          const $CMD = `${$X}`
+          ...
+          child_process.exec($CMD, ...)
+    metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
+
+  # ═══════════════════════════════════════════════════════
+  # R5 — direct mcp_config.json write detection
+  # (Added v0.1.1 per @Arch 6cd68744 + @Gatekeeper fda3816d)
+  # Only @quickport/orchestrator/quick-config-patcher/* may touch this file.
+  # ═══════════════════════════════════════════════════════
+  - id: quickwork-R5-direct-quick-config-write
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: |
+      blocker P0 [critical:security] ref:skill-$SKILL_NAME#R5:
+      直接写入 ~/.quickwork/mcp_config.json。
+      此文件是 Amazon Quick 的运行时配置文件，必须通过
+      @quickport/orchestrator/quick-config-patcher/* 走 5-invariants 协议操作：
+        1. Atomic write (rename(2))
+        2. Backup-before-write → ~/.quickwork/quickport/backups/mcp_config.<ts>.json
+        3. Schema validate (mcpServers + servers dual-schema)
+        4. HF-6 audit entry (type=quick_config_patched)
+        5. Rollback path (diff-merge on uninstall)
+      绕过此协议 = R5 blocker P0，可损坏 Amazon Quick 配置。
+    pattern-either:
+      # String literals
+      - pattern: fs.writeFileSync('~/.quickwork/mcp_config.json', ...)
+      - pattern: fs.writeFile('~/.quickwork/mcp_config.json', ...)
+      - pattern: fs.appendFileSync('~/.quickwork/mcp_config.json', ...)
+      - pattern: fs.appendFile('~/.quickwork/mcp_config.json', ...)
+      # Template literals (per @Gatekeeper f541e7ac v0.1.2)
+      - pattern: |
+          fs.writeFile(`${$X}/.quickwork/mcp_config.json`, ...)
+      - pattern: |
+          fs.writeFileSync(`${$X}/.quickwork/mcp_config.json`, ...)
+      # path.join constructions
+      - pattern: fs.writeFile(path.join($X, '.quickwork', 'mcp_config.json'), ...)
+      - pattern: fs.writeFileSync(path.join($X, '.quickwork', 'mcp_config.json'), ...)
+      - pattern: fs.writeFile(path.join(os.homedir(), '.quickwork', 'mcp_config.json'), ...)
+      - pattern: fs.writeFileSync(path.join(os.homedir(), '.quickwork', 'mcp_config.json'), ...)
+      # Fallback regex — catches any fs write referencing mcp_config.json filename
+      # Note: may produce false positives in test fixtures; allowlist via paths.exclude
+      - pattern-regex: 'mcp_config\.json'
+    paths:
+      exclude:
+        - "**/orchestrator/quick-config-patcher/**"
+        - "**/*.test.ts"
+        - "**/*.spec.ts"
+        - "**/test/**"
+        - "**/fixtures/**"
+    metadata:
+      tier: blocker
+      severity: P0
+      dimension: ["critical:security"]
+      narrow_waist: "@quickport/orchestrator/quick-config-patcher/*"
+      protected_file: "~/.quickwork/mcp_config.json"
+
+  - id: quickwork-R5-direct-capability-registry-write
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: |
+      blocker P0 [critical:security] ref:skill-$SKILL_NAME#R5:
+      直接写入 ~/.quickwork/quickport/state/capability-registry.json。
+      此文件是 QuickPort 的私有 MCP server 注册表，必须通过
+      @quickport/orchestrator/capability-registry/* 操作。
+      绕过此模块 = R5 blocker P0（注册表篡改可导致 AC-11 diff-merge uninstall 失效）。
+    pattern-either:
+      - pattern: fs.writeFile('~/.quickwork/quickport/state/capability-registry.json', ...)
+      - pattern: fs.writeFileSync('~/.quickwork/quickport/state/capability-registry.json', ...)
+      - pattern: fs.appendFile('~/.quickwork/quickport/state/capability-registry.json', ...)
+      - pattern: fs.appendFileSync('~/.quickwork/quickport/state/capability-registry.json', ...)
+      - pattern: |
+          fs.writeFile(`${$X}/quickport/state/capability-registry.json`, ...)
+      - pattern: |
+          fs.writeFileSync(`${$X}/quickport/state/capability-registry.json`, ...)
+      - pattern-regex: 'capability-registry\.json'
+    paths:
+      exclude:
+        - "**/orchestrator/capability-registry/**"
+        - "**/*.test.ts"
+        - "**/*.spec.ts"
+        - "**/test/**"
+        - "**/fixtures/**"
+    metadata:
+      tier: blocker
+      severity: P0
+      dimension: ["critical:security"]
+      narrow_waist: "@quickport/orchestrator/capability-registry/*"
+      protected_file: "~/.quickwork/quickport/state/capability-registry.json"
+
+# ═══════════════════════════════════════════════════════
+# 待 ADR-003 起稿后补全：
+# - R1 network domain diff → 需要 manifest schema lock，写 cross-file 规则
+# - R2 (full) FS path diff → 需要 manifest.capabilities.fs allowlist
+# - R4 IPC endpoint diff → MCP stdio 不开 IPC，仅 v2 D 模式 fallback 启用
+# - R8 SBOM CVE → 走 osv-scanner / npm audit / pip-audit / trivy CLI，非 Semgrep
+# - R9 capability completeness → 需要 manifest schema + cross-file analysis
+# - R10 version freshness → 安装时 metadata check，非 AST
+# - R11 capability ↔ MCP server.listOfferings() diff → deferred slot, 等 OQ-21A
+#
+# Known gaps (@Gatekeeper 50b03bd7, 7126150d):
+# 1. $SKILL_NAME substitution → engine wraps Semgrep with --metavar injection
+# 2. R5 whitelist_namespace → engine pre-filters paths before invoking Semgrep
+# 3. R7 dynamic require false-positives → allowlist lazy-require patterns in engine
+# 4. Cross-file analysis (R1/R2 full/R9) → ts-morph / babel-plugin custom analyzer
+# 5. R5-quick-config/R5-capability-registry: dynamic path construction via variable chain
+#    (e.g. `const cfg = path.join(home, ".quickwork"); fs.writeFile(cfg + "/mcp_config.json")`)
+#    — v0.1.2 covers 90%+ of practical patterns; full taint analysis = v2 (ts-morph or Semgrep taint mode)
+#    Known limitation in ADR-003 §scanner §known-gaps
+# 6. pattern-regex fallback (mcp_config.json / capability-registry.json) may FP in test fixtures
+#    → allowlist via paths.exclude test/** / fixtures/** (added in v0.1.2)
