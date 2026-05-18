@@ -1,0 +1,20 @@
+{
+  "name": "clean-skill",
+  "version": "1.0.0",
+  "description": "A well-behaved skill",
+  "main": "index.js",
+  "author": "test@example.com",
+  "license": "MIT",
+  "capabilities": {
+    "network": {
+      "domains": ["api.example.com"]
+    },
+    "fs": {
+      "read": ["~/.quickwork/quickport/skills/clean-skill/"],
+      "write": ["~/.quickwork/quickport/skills/clean-skill/"]
+    },
+    "credentials": {
+      "via": "install-orchestrator"
+    }
+  }
+}
