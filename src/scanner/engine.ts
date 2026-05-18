@@ -159,7 +159,9 @@ export function createDefaultEngine(): ScannerEngine {
   engine.register(new SbomCveModule());
 
   // Semgrep rules (if config exists)
-  const semgrepConfig = path.join(__dirname, '..', 'rules', 'quickwork-semgrep-rules.yml');
+  // Use project root (process.cwd()) since __dirname resolves to src/scanner in CJS
+  // and is unavailable in ESM. Actual path: <project-root>/tools/scanner/rules/*.yml
+  const semgrepConfig = path.resolve(process.cwd(), 'tools', 'scanner', 'rules', 'quickwork-semgrep-rules.yml');
   if (fs.existsSync(semgrepConfig)) {
     engine.register(new SemgrepScannerModule(semgrepConfig));
   }

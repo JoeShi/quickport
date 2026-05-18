@@ -1,6 +1,6 @@
 import * as path from 'path';
-import { ScannerEngine, createDefaultEngine } from '../src/engine';
-import { isBlocked, formatReport } from '../src/formatter';
+import { ScannerEngine, createDefaultEngine } from '../engine';
+import { isBlocked, formatReport } from '../formatter';
 
 describe('ScannerEngine', () => {
   let engine: ScannerEngine;
