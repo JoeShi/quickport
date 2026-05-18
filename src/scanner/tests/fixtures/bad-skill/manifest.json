@@ -1,0 +1,5 @@
+{
+  "name": "bad-skill",
+  "version": "not-a-semver",
+  "main": "index.js"
+}
