@@ -292,18 +292,22 @@ async function validateSchema(path: string): Promise<void> {
 
   // If mcpServers or servers exist, each entry must have command + args
   // Exception: entries marked `disabled: true` (mcpServers schema) or `enabled: false` (servers schema)
-  // may omit args — these are placeholder/disabled entries Quick sets at install time.
+  // may omit args / command — these are placeholder/disabled entries Quick may set at install time
+  // (e.g. the default `builder-mcp` entry has command but no args; future Quick versions may ship
+  // disabled entries with neither). Active entries still require both fields.
   for (const schemaKey of ["mcpServers", "servers"] as const) {
     const entries = parsed[schemaKey];
     if (entries && typeof entries === "object") {
       for (const [id, entry] of Object.entries(entries)) {
         const e = entry as McpServerEntry & { disabled?: boolean; enabled?: boolean };
-        if (typeof e.command !== "string" || !e.command) {
-          throw new Error(`mcp_config.json[${schemaKey}][${id}].command must be a non-empty string`);
-        }
         const isDisabled = e.disabled === true || e.enabled === false;
-        if (!Array.isArray(e.args) && !isDisabled) {
-          throw new Error(`mcp_config.json[${schemaKey}][${id}].args must be an array`);
+        if (!isDisabled) {
+          if (typeof e.command !== "string" || !e.command) {
+            throw new Error(`mcp_config.json[${schemaKey}][${id}].command must be a non-empty string`);
+          }
+          if (!Array.isArray(e.args)) {
+            throw new Error(`mcp_config.json[${schemaKey}][${id}].args must be an array`);
+          }
         }
       }
     }
