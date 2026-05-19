@@ -1,3 +1,4 @@
+import { describe, test, expect, beforeEach } from 'vitest';
 import * as path from 'path';
 import { ScannerEngine, createDefaultEngine } from '../engine';
 import { isBlocked, formatReport } from '../formatter';
