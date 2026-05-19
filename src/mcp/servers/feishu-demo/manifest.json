@@ -1,0 +1,24 @@
+{
+  "name": "feishu-demo",
+  "version": "0.1.0",
+  "description": "QuickPort Feishu demo MCP server — 3 stub tools for M1 e2e pipeline verification",
+  "main": "index.ts",
+  "capabilities": [
+    {
+      "name": "feishu-messaging",
+      "resource": "im.send",
+      "scope": "feishu://chats/*/messages",
+      "reason": "Send messages to Feishu group chats"
+    },
+    {
+      "name": "feishu-chat-list",
+      "resource": "im.read",
+      "scope": "feishu://chats",
+      "reason": "List available Feishu chats"
+    }
+  ],
+  "domains": [],
+  "fsPaths": [],
+  "author": "QuickPort",
+  "license": "MIT"
+}
