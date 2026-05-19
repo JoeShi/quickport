@@ -104,8 +104,30 @@ export async function registerMcpServer(
     config.mcpServers[serverId] = entry;
 
     // servers: Quick native format (array) — Quick UI reads this, not mcpServers
+    // Defensive recovery: if a previous buggy install stored servers as a Record (object),
+    // convert to Array preserving any existing entries before continuing.
+    if (!Array.isArray(config.servers)) {
+      const legacy = config.servers as Record<string, unknown> | undefined;
+      const recovered: QuickNativeServerEntry[] = [];
+      if (legacy && typeof legacy === "object") {
+        for (const [id, v] of Object.entries(legacy)) {
+          if (v && typeof v === "object") {
+            const e = v as Partial<QuickNativeServerEntry>;
+            recovered.push({
+              id: e.id ?? id,
+              name: e.name || id,
+              transport: "stdio",
+              command: e.command || "",
+              args: Array.isArray(e.args) ? e.args : [],
+              enabled: e.enabled ?? true,
+              ...(e.env && Object.keys(e.env).length > 0 ? { env: e.env } : {}),
+            });
+          }
+        }
+      }
+      config.servers = recovered;
+    }
     // Idempotent: remove any stale entry with same id, then push fresh entry
-    if (!Array.isArray(config.servers)) config.servers = [];
     config.servers = config.servers.filter((s) => s.id !== serverId);
     const nativeEntry: QuickNativeServerEntry = {
       id: serverId,
