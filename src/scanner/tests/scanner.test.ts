@@ -34,7 +34,12 @@ describe('ScannerEngine', () => {
     expect(ruleIds).toContain('R1-network-domain-diff');
     expect(ruleIds).toContain('R2-fs-write-sensitive');
     expect(ruleIds).toContain('R3-process-spawn-diff');
-    expect(ruleIds).toContain('R7-dangerous-api');
+    expect(ruleIds).toContain('R7-eval-exec-inject');
+    expect(ruleIds).toContain('R7-bis-shell-injection');
+    expect(ruleIds).toContain('R5-direct-keychain-access');
+    expect(ruleIds).toContain('R5-direct-quick-config-write');
+    expect(ruleIds).toContain('R5-direct-capability-registry-write');
+    expect(ruleIds).toContain('R6-secrets-scan');
   });
 
   test('output format follows v0.1 protocol', async () => {
