@@ -1,7 +1,9 @@
-# QuickPort Skill Scanner — Semgrep AST 规则集 v0.1.2
+# QuickPort Skill Scanner — Semgrep AST 规则集 v0.1.3
 # Source: @Gatekeeper (Slock msg 50b03bd7, fda3816d, f541e7ac, 7126150d)
 # Covers: R3 / R5 / R7 / R6 / R2-partial / R7-bis / R5-quick-config / R5-capability-registry (11 rules + extended patterns)
-# Status: v0.1.2 — extended quick-config patterns + capability-registry protection rule
+# Status: v0.1.3 — vendor exclude `node_modules/lark-cli/**` for R5 keychain rules
+#   (per F-HF-1 verify-not-migrate, Gatekeeper 4708892a + Jack dda81a6)
+# Prior: v0.1.2 — extended quick-config patterns + capability-registry protection rule
 # Renamed: @quickwork/* → @quickport/* (OQ-6 LOCKED per @joe-shi f2986787)
 # R5 narrow waist three+one (4 critical state files now protected):
 #   1. quickwork-R5-direct-keychain-access            (credentials)
@@ -82,6 +84,10 @@ rules:
     paths:
       exclude:
         - "**/orchestrator/credentials/**"
+        # lark-cli is third-party that legitimately uses macOS Keychain via its
+        # own master-key abstraction (per F-HF-1 verify-not-migrate, Jack dda81a6).
+        # Excluding vendor code prevents false-positive blocker findings.
+        - "**/node_modules/lark-cli/**"
     metadata:
       tier: blocker
       severity: P0
@@ -101,6 +107,11 @@ rules:
           import keyring
           ...
           keyring.$FUNC(...)
+    paths:
+      exclude:
+        - "**/orchestrator/credentials/**"
+        # Symmetric exclude for Python: vendor lark-cli also legitimate (v0.1.3)
+        - "**/node_modules/lark-cli/**"
     metadata: {tier: blocker, severity: P0, dimension: ["critical:security"]}
 
   - id: quickwork-R5-direct-audit-log-write
