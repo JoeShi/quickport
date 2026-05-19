@@ -1,0 +1,30 @@
+{
+  "name": "feishu",
+  "version": "0.2.0",
+  "description": "QuickPort Feishu MCP server — 7 real lark-cli-backed tools for Feishu IM integration",
+  "main": "index.ts",
+  "capabilities": [
+    {
+      "name": "feishu-messaging-send",
+      "resource": "im.send",
+      "scope": "feishu://chats/*/messages",
+      "reason": "Send messages and replies to Feishu group chats and DMs"
+    },
+    {
+      "name": "feishu-messaging-read",
+      "resource": "im.read",
+      "scope": "feishu://chats/*/messages",
+      "reason": "Read and search messages in Feishu chats"
+    },
+    {
+      "name": "feishu-chat-list",
+      "resource": "im.read",
+      "scope": "feishu://chats",
+      "reason": "List and search available Feishu group chats"
+    }
+  ],
+  "domains": ["open.feishu.cn", "open.larksuite.com"],
+  "fsPaths": [],
+  "author": "QuickPort",
+  "license": "MIT"
+}
