@@ -291,15 +291,18 @@ async function validateSchema(path: string): Promise<void> {
   }
 
   // If mcpServers or servers exist, each entry must have command + args
+  // Exception: entries marked `disabled: true` (mcpServers schema) or `enabled: false` (servers schema)
+  // may omit args — these are placeholder/disabled entries Quick sets at install time.
   for (const schemaKey of ["mcpServers", "servers"] as const) {
     const entries = parsed[schemaKey];
     if (entries && typeof entries === "object") {
       for (const [id, entry] of Object.entries(entries)) {
-        const e = entry as McpServerEntry;
+        const e = entry as McpServerEntry & { disabled?: boolean; enabled?: boolean };
         if (typeof e.command !== "string" || !e.command) {
           throw new Error(`mcp_config.json[${schemaKey}][${id}].command must be a non-empty string`);
         }
-        if (!Array.isArray(e.args)) {
+        const isDisabled = e.disabled === true || e.enabled === false;
+        if (!Array.isArray(e.args) && !isDisabled) {
           throw new Error(`mcp_config.json[${schemaKey}][${id}].args must be an array`);
         }
       }

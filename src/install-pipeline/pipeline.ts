@@ -134,7 +134,12 @@ export class DefaultInstallPipeline implements InstallPipeline {
 
     // Stage 3: extract → install destination
     const skillName = manifest.name;
-    const isMcpServer = manifest.type === 'mcp-server';
+    // Detect if this is an MCP server (has executable `main` entry) vs a pure skill
+    // (markdown-only, no main). Explicit `type: 'mcp-server'` overrides.
+    const isMcpServer =
+      manifest.type === 'mcp-server' ||
+      (typeof manifest.main === 'string' &&
+        /\.(ts|tsx|js|mjs|cjs)$/.test(manifest.main));
     const destBase = isMcpServer ? MCP_SERVERS_DIR : SKILLS_DIR;
     const destPath = resolve(destBase, skillName);
 
@@ -224,12 +229,25 @@ export class DefaultInstallPipeline implements InstallPipeline {
     manifest: SkillManifest,
     installedPath: string,
   ): import('../orchestrator/quick-config-patcher/index.js').McpServerEntry {
-    // SCAFFOLD: a real impl reads manifest.entrypoint or runtime config to build this.
-    // Today we just produce a deterministic shape so quick-config-patcher schema-validate passes.
+    // Read manifest.main; default to "index.ts" or "index.mjs".
+    const main = typeof manifest.main === 'string' ? manifest.main : 'index.ts';
+    const mainPath = resolve(installedPath, main);
+
+    // Choose launcher by extension:
+    //   .ts / .tsx → npx tsx (Node + tsx loader, matches feishu-demo/feishu MCP servers in repo)
+    //   .mjs / .js → node directly
+    if (main.endsWith('.ts') || main.endsWith('.tsx')) {
+      return {
+        name: manifest.name,
+        command: 'npx',
+        args: ['tsx', mainPath],
+        env: {},
+      };
+    }
     return {
       name: manifest.name,
-      command: 'node', // placeholder — manifest must declare actual launcher
-      args: [resolve(installedPath, 'server.mjs')],
+      command: 'node',
+      args: [mainPath],
       env: {},
     };
   }
