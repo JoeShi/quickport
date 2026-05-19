@@ -143,7 +143,7 @@ const TOOLS = [
   {
     name: "feishu_send_message",
     description:
-      "Send a text or markdown message to a Feishu group chat or DM. Requires chat_id (oc_xxx) or user_id (ou_xxx).",
+      "Send a text or markdown message to a Feishu group chat or DM. Requires chat_id (oc_xxx) or user_id (ou_xxx). Defaults to user identity (BYOAccount / OQ-8).",
     inputSchema: {
       type: "object",
       properties: {
@@ -162,6 +162,11 @@ const TOOLS = [
         markdown: {
           type: "string",
           description: "Markdown-formatted message content. Mutually exclusive with text.",
+        },
+        identity: {
+          type: "string",
+          enum: ["user", "bot"],
+          description: "Identity to send as. Default: 'user' (BYOAccount). Use 'bot' only for enterprise bot scenarios.",
         },
       },
     },
@@ -259,6 +264,11 @@ const TOOLS = [
           type: "boolean",
           description: "If true, reply in the message thread rather than the main chat",
         },
+        identity: {
+          type: "string",
+          enum: ["user", "bot"],
+          description: "Identity to reply as. Default: 'user' (BYOAccount).",
+        },
       },
       required: ["message_id"],
     },
@@ -310,7 +320,8 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
     case "feishu_send_message": {
       if (!args.chat_id && !args.user_id) return errorResult("chat_id or user_id is required");
       if (!args.text && !args.markdown) return errorResult("text or markdown is required");
-      const cliArgs = ["im", "+messages-send"];
+      const identity = args.identity === "bot" ? "bot" : "user"; // default: user (BYOAccount)
+      const cliArgs = ["im", "+messages-send", "--as", identity];
       if (args.chat_id) cliArgs.push("--chat-id", String(args.chat_id));
       if (args.user_id) cliArgs.push("--user-id", String(args.user_id));
       if (args.text) cliArgs.push("--text", String(args.text));
@@ -354,7 +365,8 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
     case "feishu_reply_message": {
       if (!args.message_id) return errorResult("message_id is required");
       if (!args.text && !args.markdown) return errorResult("text or markdown is required");
-      const cliArgs = ["im", "+messages-reply", "--message-id", String(args.message_id)];
+      const replyIdentity = args.identity === "bot" ? "bot" : "user";
+      const cliArgs = ["im", "+messages-reply", "--message-id", String(args.message_id), "--as", replyIdentity];
       if (args.text) cliArgs.push("--text", String(args.text));
       if (args.markdown) cliArgs.push("--markdown", String(args.markdown));
       if (args.reply_in_thread) cliArgs.push("--reply-in-thread");
