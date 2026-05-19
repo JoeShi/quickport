@@ -53,14 +53,24 @@ export interface McpServerEntry {
 
 /**
  * mcp_config.json dual-schema:
- *   - "mcpServers" key = Claude Desktop compatibility format
- *   - "servers" key = Amazon Quick native format
+ *   - "mcpServers" key = Claude Desktop compatibility format (Record<id, entry>)
+ *   - "servers" key = Amazon Quick native format (Array<entry-with-id>) — entries shaped
+ *     like { id, name, transport, command, args, enabled }. Quick reads from THIS array,
+ *     not from mcpServers, so we MUST mirror writes to both shapes.
  * Both may coexist. We write to both for maximum compatibility.
  */
 export interface McpConfig {
   mcpServers?: Record<string, McpServerEntry>;
-  servers?: Record<string, McpServerEntry>;
+  /** Quick's native format — array of entries; each entry has its own `id` field */
+  servers?: Array<QuickServerEntry>;
   [key: string]: unknown; // preserve unknown Quick-internal fields
+}
+
+/** Shape of one entry in Quick's native `servers` array. */
+export interface QuickServerEntry extends McpServerEntry {
+  id: string;
+  transport?: "stdio" | "sse" | "http";
+  enabled?: boolean;
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -83,10 +93,36 @@ export async function registerMcpServer(
   scanEventRef?: string
 ): Promise<void> {
   await patchConfig("add", [serverId], scanEventRef, (config) => {
+    // mcpServers (Claude Desktop compat) — Record<id, entry>
     config.mcpServers ??= {};
-    config.servers ??= {};
     config.mcpServers[serverId] = entry;
-    config.servers[serverId] = entry;
+
+    // servers (Quick native) — Array<entry-with-id>; mirror as a Quick-shaped entry
+    config.servers ??= [];
+    if (!Array.isArray(config.servers)) {
+      // Defensive: if a previous buggy write stored Record-shaped servers,
+      // recover by converting to the canonical Array shape.
+      const recovered: QuickServerEntry[] = [];
+      for (const [id, v] of Object.entries(config.servers as Record<string, unknown>)) {
+        if (v && typeof v === "object") {
+          const e = v as Partial<QuickServerEntry> & McpServerEntry;
+          recovered.push({ ...e, id: e.id ?? id });
+        }
+      }
+      config.servers = recovered;
+    }
+    const quickEntry: QuickServerEntry = {
+      id: serverId,
+      name: entry.name,
+      transport: "stdio",
+      command: entry.command,
+      args: entry.args,
+      env: entry.env,
+      enabled: true,
+    };
+    const i = config.servers.findIndex((s) => s.id === serverId);
+    if (i >= 0) config.servers[i] = quickEntry;
+    else config.servers.push(quickEntry);
   });
   // Symmetric write: record to our private registry (per @Arch d7873f09)
   // This is the single source of truth for AC-11 diff-merge uninstall.
@@ -102,7 +138,9 @@ export async function registerMcpServer(
 export async function unregisterMcpServer(serverId: string): Promise<void> {
   await patchConfig("remove", [serverId], undefined, (config) => {
     if (config.mcpServers?.[serverId]) delete config.mcpServers[serverId];
-    if (config.servers?.[serverId]) delete config.servers[serverId];
+    if (Array.isArray(config.servers)) {
+      config.servers = config.servers.filter((s) => s.id !== serverId);
+    }
   });
   // Symmetric remove from our private registry
   await registryUnregister(serverId);
@@ -126,7 +164,10 @@ export async function uninstallAllManagedServers(): Promise<void> {
   await patchConfig("repair", managedIds, undefined, (config) => {
     for (const id of managedIds) {
       if (config.mcpServers?.[id]) delete config.mcpServers[id];
-      if (config.servers?.[id]) delete config.servers[id];
+    }
+    if (Array.isArray(config.servers)) {
+      const removeSet = new Set(managedIds);
+      config.servers = config.servers.filter((s) => !removeSet.has(s.id));
     }
   });
 
@@ -290,24 +331,42 @@ async function validateSchema(path: string): Promise<void> {
     throw new Error("mcp_config.json root must be a JSON object");
   }
 
-  // If mcpServers or servers exist, each entry must have command + args
-  // Exception: entries marked `disabled: true` (mcpServers schema) or `enabled: false` (servers schema)
-  // may omit args / command — these are placeholder/disabled entries Quick may set at install time
-  // (e.g. the default `builder-mcp` entry has command but no args; future Quick versions may ship
-  // disabled entries with neither). Active entries still require both fields.
-  for (const schemaKey of ["mcpServers", "servers"] as const) {
-    const entries = parsed[schemaKey];
-    if (entries && typeof entries === "object") {
-      for (const [id, entry] of Object.entries(entries)) {
-        const e = entry as McpServerEntry & { disabled?: boolean; enabled?: boolean };
-        const isDisabled = e.disabled === true || e.enabled === false;
-        if (!isDisabled) {
-          if (typeof e.command !== "string" || !e.command) {
-            throw new Error(`mcp_config.json[${schemaKey}][${id}].command must be a non-empty string`);
-          }
-          if (!Array.isArray(e.args)) {
-            throw new Error(`mcp_config.json[${schemaKey}][${id}].args must be an array`);
-          }
+  // Validate mcpServers (Record<id, entry>) — entries must have command + args
+  // (relaxed for disabled entries, see boundary above).
+  const mcpServers = parsed.mcpServers;
+  if (mcpServers && typeof mcpServers === "object" && !Array.isArray(mcpServers)) {
+    for (const [id, entry] of Object.entries(mcpServers)) {
+      const e = entry as McpServerEntry & { disabled?: boolean };
+      const isDisabled = e.disabled === true;
+      if (!isDisabled) {
+        if (typeof e.command !== "string" || !e.command) {
+          throw new Error(`mcp_config.json[mcpServers][${id}].command must be a non-empty string`);
+        }
+        if (!Array.isArray(e.args)) {
+          throw new Error(`mcp_config.json[mcpServers][${id}].args must be an array`);
+        }
+      }
+    }
+  }
+
+  // Validate servers (Array<entry-with-id>) — Quick's native format.
+  const servers = parsed.servers;
+  if (servers !== undefined) {
+    if (!Array.isArray(servers)) {
+      throw new Error("mcp_config.json.servers must be an array (Quick native format)");
+    }
+    for (let i = 0; i < servers.length; i++) {
+      const e = servers[i] as QuickServerEntry & { enabled?: boolean };
+      if (typeof e.id !== "string" || !e.id) {
+        throw new Error(`mcp_config.json[servers][${i}].id must be a non-empty string`);
+      }
+      const isDisabled = e.enabled === false;
+      if (!isDisabled) {
+        if (typeof e.command !== "string" || !e.command) {
+          throw new Error(`mcp_config.json[servers][${i}=${e.id}].command must be a non-empty string`);
+        }
+        if (!Array.isArray(e.args)) {
+          throw new Error(`mcp_config.json[servers][${i}=${e.id}].args must be an array`);
         }
       }
     }
